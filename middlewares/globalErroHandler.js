@@ -25,7 +25,7 @@ export const globalErrorHandler = (err, req, res, next) => {
     error = new AppError(
       "Duplicate value detected. This record already exists.",
       400,
-      "DB_CONSTRAINT"
+      "DB_CONSTRAINT",
     );
   }
 
@@ -34,7 +34,14 @@ export const globalErrorHandler = (err, req, res, next) => {
     error = new AppError(
       "Database table not found. Migration may be missing.",
       500,
-      "DB_TABLE_MISSING"
+      "DB_TABLE_MISSING",
+    );
+  }
+  if (err.message === "DATABASE_TIMEOUT") {
+    error = new AppError(
+      "Database request timed out. Please try again.",
+      503,
+      "DB_TIMEOUT",
     );
   }
 
@@ -59,7 +66,7 @@ export const globalErrorHandler = (err, req, res, next) => {
     error = new AppError(
       err.message || "Authorization error",
       err.statusCode,
-      err.code || "AUTH_ERROR"
+      err.code || "AUTH_ERROR",
     );
   }
 
@@ -73,7 +80,7 @@ export const globalErrorHandler = (err, req, res, next) => {
     error = new AppError(
       "Something went wrong. Please try again later.",
       500,
-      "INTERNAL_ERROR"
+      "INTERNAL_ERROR",
     );
   }
 

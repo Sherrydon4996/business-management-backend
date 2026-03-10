@@ -3,36 +3,24 @@ import { db } from "./../config/db.js";
 //  DATABASE SCHEMA — Cyber Cafe Business Management App
 //  Tables: users, refresh_tokens, income, expenses,
 //          contributions, computer_sessions, movie_bookings,
-//          movies_inventory, ps_games, cyber_services
+//          movies_inventory, ps_games, cyber_services, debts
 // ============================================================
 
-// ------------------------------------------------------------
-//  CREATE TABLES
-// ------------------------------------------------------------
-
 export const createTables = async () => {
-  // ----------------------------------------------------------
-  //  1. USERS
-  //     Stores admin and regular user accounts.
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id                 TEXT PRIMARY KEY,
       username           TEXT NOT NULL UNIQUE,
       mobile             TEXT NOT NULL,
       password           TEXT NOT NULL,
-      role               TEXT NOT NULL DEFAULT 'user',    -- 'admin' | 'user'
-      status             TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'suspended'
+      role               TEXT NOT NULL DEFAULT 'user',
+      status             TEXT NOT NULL DEFAULT 'active',
       session_started_at TEXT,
       session_expires_at TEXT,
       created_at         TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
-  // ----------------------------------------------------------
-  //  2. REFRESH TOKENS
-  //     JWT refresh tokens linked to users.
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
       id         TEXT PRIMARY KEY,
@@ -44,34 +32,25 @@ export const createTables = async () => {
     );
   `);
 
-  // ----------------------------------------------------------
-  //  3. INCOME
-  //     Records every income entry across all categories.
-  //     category: 'PS Gaming' | 'Cyber Services' | 'Movie Rentals'
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS income (
       id             TEXT PRIMARY KEY,
       amount         REAL NOT NULL CHECK(amount > 0),
-      category       TEXT NOT NULL,    -- 'PS Gaming' | 'Cyber Services' | 'Movie Rentals'
+      category       TEXT NOT NULL,
       description    TEXT,
       payment_method TEXT NOT NULL,
       recorded_by    TEXT NOT NULL,
-      date           TEXT NOT NULL,    -- ISO 8601 with timezone e.g. 2026-03-04T14:00:00+03:00
+      date           TEXT NOT NULL,
       created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (recorded_by) REFERENCES users(id)
     );
   `);
 
-  // ----------------------------------------------------------
-  //  4. EXPENSES
-  //     Records every business expense entry.
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS expenses (
       id             TEXT PRIMARY KEY,
       amount         REAL NOT NULL CHECK(amount > 0),
-      category       TEXT NOT NULL,    -- e.g. 'Stock Purchase' | 'Utilities' | 'Internet' etc.
+      category       TEXT NOT NULL,
       description    TEXT,
       payment_method TEXT NOT NULL,
       recorded_by    TEXT NOT NULL,
@@ -81,21 +60,14 @@ export const createTables = async () => {
     );
   `);
 
-  // ----------------------------------------------------------
-  //  5. CONTRIBUTIONS
-  //     Weekly group, cooperative bank, caritas bank & custom
-  //     contributions.
-  //     type:   'weekly_group' | 'cooperative_bank' | 'caritas_bank' | 'custom'
-  //     status: 'paid' | 'pending' | 'overdue'
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS contributions (
       id             TEXT PRIMARY KEY,
       amount         REAL NOT NULL CHECK(amount > 0),
-      type           TEXT NOT NULL,    -- 'weekly_group' | 'cooperative_bank' | 'caritas_bank' | 'custom'
+      type           TEXT NOT NULL,
       description    TEXT,
       payment_method TEXT NOT NULL,
-      status         TEXT NOT NULL DEFAULT 'paid',  -- 'paid' | 'pending' | 'overdue'
+      status         TEXT NOT NULL DEFAULT 'paid',
       recorded_by    TEXT NOT NULL,
       date           TEXT NOT NULL,
       created_at     TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -103,82 +75,58 @@ export const createTables = async () => {
     );
   `);
 
-  // ----------------------------------------------------------
-  //  6. COMPUTER SESSIONS  (PS / Gaming Sessions)
-  //     Tracks timed gaming sessions for each day.
-  //     Other one-off earnings are recorded in the income table.
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS computer_sessions (
       id          TEXT PRIMARY KEY,
       amount      REAL NOT NULL CHECK(amount > 0),
-      start_time  TEXT NOT NULL,   -- e.g. '14:00'
-      end_time    TEXT NOT NULL,   -- e.g. '15:30'
-      status      TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'done'
-      date_key    TEXT NOT NULL,   -- YYYY-MM-DD (Kenyan date)
+      start_time  TEXT NOT NULL,
+      end_time    TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'active',
+      date_key    TEXT NOT NULL,
       created_at  TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
-  // ----------------------------------------------------------
-  //  7. MOVIE & SERIES BOOKINGS
-  //     Tracks customer rentals and pickup status.
-  //     pick_date: the date the customer will collect the movie.
-  //     status: 'pending' (not yet picked up) | 'active' (picked up) |
-  //             'delivered' (returned) | 'cancelled' (auto or manual)
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS movie_bookings (
       id             TEXT PRIMARY KEY,
       customer_name  TEXT NOT NULL,
       customer_phone TEXT,
       title          TEXT NOT NULL,
-      type           TEXT NOT NULL DEFAULT 'movie',   -- 'movie' | 'series'
-      pick_date      TEXT NOT NULL,                   -- YYYY-MM-DD
+      type           TEXT NOT NULL DEFAULT 'movie',
+      pick_date      TEXT NOT NULL,
       amount         REAL NOT NULL CHECK(amount > 0),
-      status         TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'active' | 'delivered' | 'cancelled'
-      booked_at      TEXT NOT NULL,                   -- ISO 8601 +03:00
+      status         TEXT NOT NULL DEFAULT 'pending',
+      booked_at      TEXT NOT NULL,
       created_at     TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
-  // ----------------------------------------------------------
-  //  8. MOVIES & SERIES INVENTORY
-  //     Full catalog of movies and series available for rent.
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS movies_inventory (
       id          TEXT PRIMARY KEY,
       title       TEXT NOT NULL,
       genre       TEXT NOT NULL,
       year        TEXT NOT NULL,
-      type        TEXT NOT NULL DEFAULT 'movie',  -- 'movie' | 'series'
-      seasons     INTEGER,                        -- only for series
+      type        TEXT NOT NULL DEFAULT 'movie',
+      seasons     INTEGER,
       date_added  TEXT NOT NULL,
       created_at  TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
-  // ----------------------------------------------------------
-  //  9. PS GAMES
-  //     PlayStation game library with pricing and availability.
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS ps_games (
       id              TEXT PRIMARY KEY,
       name            TEXT NOT NULL,
-      platform        TEXT NOT NULL DEFAULT 'PS5',  -- 'PS4' | 'PS5' etc.
+      platform        TEXT NOT NULL DEFAULT 'PS5',
       price_per_hour  REAL NOT NULL CHECK(price_per_hour > 0),
-      available       INTEGER NOT NULL DEFAULT 1,   -- 1 = available, 0 = unavailable
+      available       INTEGER NOT NULL DEFAULT 1,
       date_added      TEXT NOT NULL,
       created_at      TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
-  // ----------------------------------------------------------
-  //  10. CYBER SERVICES
-  //      Service offerings with pricing for the cyber cafe.
-  // ----------------------------------------------------------
   await db.execute(`
     CREATE TABLE IF NOT EXISTS cyber_services (
       id          TEXT PRIMARY KEY,
@@ -191,42 +139,63 @@ export const createTables = async () => {
   `);
 
   // ----------------------------------------------------------
-  //  INDEXES — for fast querying by date, category, status
+  //  11. DEBTS
+  //
+  //  income_category: 'PS Gaming' | 'Cyber Services' | 'Movie Rentals'
+  //    → When a debt is settled (fully or partially), a matching
+  //      income row is auto-inserted into the income table for that
+  //      category so the books stay correct.
+  //
+  //  status:
+  //    'pending'   — no payment yet
+  //    'partial'   — some payment received, balance still owed
+  //    'settled'   — fully paid (amount_settled >= amount)
+  //    'defaulted' — bad debt, highlighted red, excluded from income
   // ----------------------------------------------------------
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS debts (
+      id               TEXT PRIMARY KEY,
+      customer_name    TEXT NOT NULL,
+      customer_phone   TEXT,
+      amount           REAL    NOT NULL CHECK(amount > 0),
+      amount_settled   REAL    NOT NULL DEFAULT 0,
+      income_category  TEXT    NOT NULL,
+      description      TEXT,
+      payment_method   TEXT    NOT NULL DEFAULT 'Cash',
+      status           TEXT    NOT NULL DEFAULT 'pending',
+      recorded_by      TEXT    NOT NULL,
+      date             TEXT    NOT NULL,
+      settled_at       TEXT,
+      created_at       TEXT    DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (recorded_by) REFERENCES users(id)
+    );
+  `);
 
-  // users
+  // ── Indexes ────────────────────────────────────────────────────────────────
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);`,
+    `CREATE INDEX IF NOT EXISTS idx_users_status       ON users(status);`,
   );
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_users_role   ON users(role);`,
-  );
-
-  // refresh_tokens
-  await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_tokens_user ON refresh_tokens(user_id);`,
-  );
-
-  // income
-  await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_income_category ON income(category);`,
+    `CREATE INDEX IF NOT EXISTS idx_users_role         ON users(role);`,
   );
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_income_date      ON income(date);`,
+    `CREATE INDEX IF NOT EXISTS idx_tokens_user        ON refresh_tokens(user_id);`,
   );
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_income_recorded  ON income(recorded_by);`,
+    `CREATE INDEX IF NOT EXISTS idx_income_category    ON income(category);`,
   );
-
-  // expenses
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);`,
+    `CREATE INDEX IF NOT EXISTS idx_income_date        ON income(date);`,
+  );
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_income_recorded    ON income(recorded_by);`,
+  );
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_expenses_category  ON expenses(category);`,
   );
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_expenses_date      ON expenses(date);`,
   );
-
-  // contributions
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_contributions_type   ON contributions(type);`,
   );
@@ -236,16 +205,12 @@ export const createTables = async () => {
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_contributions_date   ON contributions(date);`,
   );
-
-  // computer sessions
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_sessions_date   ON computer_sessions(date_key);`,
+    `CREATE INDEX IF NOT EXISTS idx_sessions_date      ON computer_sessions(date_key);`,
   );
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_sessions_status ON computer_sessions(status);`,
+    `CREATE INDEX IF NOT EXISTS idx_sessions_status    ON computer_sessions(status);`,
   );
-
-  // movie bookings
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_bookings_status    ON movie_bookings(status);`,
   );
@@ -255,21 +220,26 @@ export const createTables = async () => {
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_bookings_booked_at ON movie_bookings(booked_at);`,
   );
-
-  // movies inventory
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_movies_type       ON movies_inventory(type);`,
+    `CREATE INDEX IF NOT EXISTS idx_movies_type        ON movies_inventory(type);`,
   );
   await db.execute(
-    `CREATE INDEX IF NOT EXISTS idx_movies_date_added ON movies_inventory(date_added);`,
+    `CREATE INDEX IF NOT EXISTS idx_movies_date_added  ON movies_inventory(date_added);`,
   );
-
-  // ps games
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_ps_games_platform  ON ps_games(platform);`,
   );
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_ps_games_available ON ps_games(available);`,
+  );
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_debts_status       ON debts(status);`,
+  );
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_debts_date         ON debts(date);`,
+  );
+  await db.execute(
+    `CREATE INDEX IF NOT EXISTS idx_debts_category     ON debts(income_category);`,
   );
 
   console.log("✅ All tables and indexes created successfully.");
@@ -277,8 +247,6 @@ export const createTables = async () => {
 
 // ------------------------------------------------------------
 //  MIGRATIONS
-//  Safe, additive changes to existing tables.
-//  Run once on app startup after createTables().
 // ------------------------------------------------------------
 
 export const runMigrations = async () => {
@@ -286,7 +254,6 @@ export const runMigrations = async () => {
     // ── users ──────────────────────────────────────────────────────────────────
     const userInfo = await db.execute(`PRAGMA table_info(users);`);
     const userCols = userInfo.rows.map((c) => c.name);
-
     if (!userCols.includes("session_started_at")) {
       await db.execute(`ALTER TABLE users ADD COLUMN session_started_at TEXT;`);
       console.log("Migration: added users.session_started_at");
@@ -299,7 +266,6 @@ export const runMigrations = async () => {
     // ── income ─────────────────────────────────────────────────────────────────
     const incomeInfo = await db.execute(`PRAGMA table_info(income);`);
     const incomeCols = incomeInfo.rows.map((c) => c.name);
-
     if (!incomeCols.includes("payment_method")) {
       await db.execute(
         `ALTER TABLE income ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'Cash';`,
@@ -310,36 +276,24 @@ export const runMigrations = async () => {
     // ── movie_bookings ─────────────────────────────────────────────────────────
     const bookingInfo = await db.execute(`PRAGMA table_info(movie_bookings);`);
     const bookingCols = bookingInfo.rows.map((c) => c.name);
-
     if (!bookingCols.includes("customer_phone")) {
       await db.execute(
         `ALTER TABLE movie_bookings ADD COLUMN customer_phone TEXT;`,
       );
       console.log("Migration: added movie_bookings.customer_phone");
     }
-
     if (!bookingCols.includes("pick_date")) {
       await db.execute(
         `ALTER TABLE movie_bookings ADD COLUMN pick_date TEXT NOT NULL DEFAULT '2026-01-01';`,
       );
-      // Back-fill from booked_at for existing rows
       await db.execute(
         `UPDATE movie_bookings SET pick_date = SUBSTR(booked_at, 1, 10) WHERE pick_date = '2026-01-01';`,
       );
       console.log("Migration: added movie_bookings.pick_date");
     }
 
-    // Remove return_date from any existing rows that have it
-    // SQLite cannot DROP columns directly before v3.35 — we handle this by
-    // simply ignoring it in all queries. If your SQLite version is >= 3.35:
-    // await db.execute(`ALTER TABLE movie_bookings DROP COLUMN return_date;`);
-
     // ── Triggers ───────────────────────────────────────────────────────────────
-
-    // Drop the old overdue trigger (was keyed on return_date, now obsolete)
     await db.execute(`DROP TRIGGER IF EXISTS trigger_mark_overdue_bookings;`);
-
-    // Auto-cancel bookings whose pick_date has passed and are still pending/active
     await db.execute(`
       CREATE TRIGGER IF NOT EXISTS trigger_auto_cancel_bookings
       AFTER UPDATE ON movie_bookings
@@ -349,8 +303,6 @@ export const runMigrations = async () => {
         UPDATE movie_bookings SET status = 'cancelled' WHERE id = NEW.id;
       END;
     `);
-
-    // Auto-mark computer sessions as done when end_time is reached
     await db.execute(`
       CREATE TRIGGER IF NOT EXISTS trigger_mark_session_done
       AFTER UPDATE ON computer_sessions
@@ -361,11 +313,11 @@ export const runMigrations = async () => {
       END;
     `);
 
+    // ── computer_sessions ──────────────────────────────────────────────────────
     const sessionsInfo = await db.execute(
       `PRAGMA table_info(computer_sessions);`,
     );
     const sessionsCols = sessionsInfo.rows.map((c) => c.name);
-
     if (!sessionsCols.includes("customer_name")) {
       await db.execute(
         `ALTER TABLE computer_sessions ADD COLUMN customer_name TEXT NOT NULL DEFAULT '';`,
@@ -384,8 +336,26 @@ export const runMigrations = async () => {
       );
       console.log("Migration: added computer_sessions.num_games");
     }
+    if (!sessionsCols.includes("session_type")) {
+      await db.execute(
+        `ALTER TABLE computer_sessions ADD COLUMN session_type TEXT NOT NULL DEFAULT 'ps';`,
+      );
+      console.log("Migration: added computer_sessions.session_type");
+    }
+    if (!sessionsCols.includes("computer_number")) {
+      await db.execute(
+        `ALTER TABLE computer_sessions ADD COLUMN computer_number INTEGER;`,
+      );
+      console.log("Migration: added computer_sessions.computer_number");
+    }
+    if (!sessionsCols.includes("minutes")) {
+      await db.execute(
+        `ALTER TABLE computer_sessions ADD COLUMN minutes INTEGER NOT NULL DEFAULT 0;`,
+      );
+      console.log("Migration: added computer_sessions.minutes");
+    }
 
-    // ps_games: add minutes_per_game
+    // ── ps_games ───────────────────────────────────────────────────────────────
     const psGamesInfo = await db.execute(`PRAGMA table_info(ps_games);`);
     const psGamesCols = psGamesInfo.rows.map((c) => c.name);
     if (!psGamesCols.includes("minutes_per_game")) {
@@ -394,32 +364,36 @@ export const runMigrations = async () => {
       );
       console.log("Migration: added ps_games.minutes_per_game");
     }
-    const csInfo = await db.execute(`PRAGMA table_info(computer_sessions);`);
-    const csCols = csInfo.rows.map((c) => c.name);
 
-    // Distinguishes PC internet sessions from PS gaming sessions
-    if (!csCols.includes("session_type")) {
-      await db.execute(
-        `ALTER TABLE computer_sessions ADD COLUMN session_type TEXT NOT NULL DEFAULT 'ps';`,
+    // ── debts (idempotent — CREATE IF NOT EXISTS) ──────────────────────────────
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS debts (
+        id               TEXT PRIMARY KEY,
+        customer_name    TEXT NOT NULL,
+        customer_phone   TEXT,
+        amount           REAL    NOT NULL CHECK(amount > 0),
+        amount_settled   REAL    NOT NULL DEFAULT 0,
+        income_category  TEXT    NOT NULL,
+        description      TEXT,
+        payment_method   TEXT    NOT NULL DEFAULT 'Cash',
+        status           TEXT    NOT NULL DEFAULT 'pending',
+        recorded_by      TEXT    NOT NULL,
+        date             TEXT    NOT NULL,
+        settled_at       TEXT,
+        created_at       TEXT    DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (recorded_by) REFERENCES users(id)
       );
-      console.log("Migration: added computer_sessions.session_type");
-    }
-
-    // Computer/PC number at the desk (only used by 'computer' session_type)
-    if (!csCols.includes("computer_number")) {
-      await db.execute(
-        `ALTER TABLE computer_sessions ADD COLUMN computer_number INTEGER;`,
-      );
-      console.log("Migration: added computer_sessions.computer_number");
-    }
-
-    // Minutes of the session (= amount for computer sessions, derived for PS)
-    if (!csCols.includes("minutes")) {
-      await db.execute(
-        `ALTER TABLE computer_sessions ADD COLUMN minutes INTEGER NOT NULL DEFAULT 0;`,
-      );
-      console.log("Migration: added computer_sessions.minutes");
-    }
+    `);
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_debts_status   ON debts(status);`,
+    );
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_debts_date     ON debts(date);`,
+    );
+    await db.execute(
+      `CREATE INDEX IF NOT EXISTS idx_debts_category ON debts(income_category);`,
+    );
+    console.log("Migration: debts table ready");
 
     console.log("✅ Migrations completed successfully.");
   } catch (error) {

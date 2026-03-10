@@ -40,6 +40,8 @@ import computerSessionsUserRouter from "./RouteHandlers/computerSessions/user.ro
 import moviesInventoryUserRouter from "./RouteHandlers/moviesInventory/user.routes.js";
 import moviesInventoryAdminRouter from "./RouteHandlers/moviesInventory/admin.routes.js";
 import aiUserRouter from "./RouteHandlers/AiAssistant/user.routes.js";
+import debtsUserRouter from "./RouteHandlers/debts/user.routes.js";
+import debtsAdminRouter from "./RouteHandlers/debts/admin.routes.js";
 
 const app = express();
 
@@ -119,6 +121,7 @@ app.use(
 );
 
 app.use("/api/v1/ai-assistant", authenticate, checkSession, aiUserRouter);
+app.use("/api/v1/debts", authenticate, checkSession, debtsUserRouter);
 
 // Protected admin routes (authentication + session check + admin authorization)
 
@@ -188,6 +191,13 @@ app.use(
   checkSession,
   authorizeAdmin,
   moviesInventoryAdminRouter,
+);
+app.use(
+  "/api/v1/admin/debts",
+  authenticate,
+  checkSession,
+  authorizeAdmin,
+  debtsAdminRouter,
 );
 
 // Error handler (must be last)

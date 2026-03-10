@@ -3,20 +3,9 @@
 import { db } from "../../config/db.js";
 
 // ─── GET /api/v1/weekly-summary/get?month=2&year=2026 ────────────────────────
-//
-//  Accepts query params:
-//    month  — 0-based month index (0 = January … 11 = December)
-//    year   — 4-digit year
-//
-//  Returns:
-//    weeks[]          — 4 weekly buckets for the requested month
-//    monthlyTotals    — income/contributions/expenses/savings for current month
-//    yearlyTotals     — same but for the full current year
 
 export const getWeeklySummary = async (req, res) => {
   try {
-    // ── Parse & validate query params ────────────────────────────────────────
-
     const month = parseInt(req.query.month ?? new Date().getMonth(), 10); // 0-based
     const year = parseInt(req.query.year ?? new Date().getFullYear(), 10);
 
@@ -24,25 +13,20 @@ export const getWeeklySummary = async (req, res) => {
       return res.status(400).json({
         success: false,
         code: "INVALID_MONTH",
-        message: "month must be an integer between 0 and 11",
+        message: "month must be 0–11",
       });
     }
     if (isNaN(year) || year < 2000 || year > 2100) {
       return res.status(400).json({
         success: false,
         code: "INVALID_YEAR",
-        message: "year must be a 4-digit integer",
+        message: "year must be 4-digit",
       });
     }
 
-    // ── Build 4-week buckets for the requested month ──────────────────────────
-    //
-    //  Week 1: day  1 → day  7
-    //  Week 2: day  8 → day 14
-    //  Week 3: day 15 → day 21
-    //  Week 4: day 22 → last day of month  (absorbs any remaining days)
-
-    const lastDayOfMonth = new Date(year, month + 1, 0).getDate(); // e.g. 28/29/30/31
+    const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+    const pad = (n) => String(n).padStart(2, "0");
+    const monthStr = pad(month + 1);
 
     const weekBoundaries = [
       { start: 1, end: 7 },
@@ -51,19 +35,15 @@ export const getWeeklySummary = async (req, res) => {
       { start: 22, end: lastDayOfMonth },
     ];
 
-    const pad = (n) => String(n).padStart(2, "0");
-    const monthStr = pad(month + 1); // 1-based for ISO strings
+    // ── 4 week buckets ────────────────────────────────────────────────────────
 
     const weeks = [];
 
     for (let w = 0; w < weekBoundaries.length; w++) {
       const { start, end } = weekBoundaries[w];
-
-      // YYYY-MM-DD bounds — we compare against SUBSTR(date, 1, 10)
       const startKey = `${year}-${monthStr}-${pad(start)}`;
       const endKey = `${year}-${monthStr}-${pad(end)}`;
 
-      // Human-readable label e.g. "Mar 01 – Mar 07"
       const fmtDay = (day) =>
         new Date(year, month, day).toLocaleDateString("en-KE", {
           month: "short",
@@ -72,25 +52,29 @@ export const getWeeklySummary = async (req, res) => {
         });
       const weekLabel = `${fmtDay(start)} – ${fmtDay(end)}`;
 
-      // Run income, contributions, expenses in parallel for this week
-      const [incRow, contRow, expRow] = await Promise.all([
+      // Income, contributions, expenses, and debt outstanding — all parallel
+      const [incRow, contRow, expRow, debtRow] = await Promise.all([
         db.execute(
-          `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total
-           FROM income
-           WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?`,
+          `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM income
+           WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
           [startKey, endKey],
         ),
         db.execute(
-          `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total
-           FROM contributions
-           WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?
-             AND status = 'paid'`,
+          `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM contributions
+           WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ? AND status = 'paid'`,
           [startKey, endKey],
         ),
         db.execute(
-          `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total
-           FROM expenses
-           WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?`,
+          `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM expenses
+           WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
+          [startKey, endKey],
+        ),
+        // Debts CREATED in this week that are still unpaid
+        db.execute(
+          `SELECT ROUND(COALESCE(SUM(amount - amount_settled),0),2) AS total
+           FROM debts
+           WHERE status NOT IN ('settled','defaulted')
+             AND SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
           [startKey, endKey],
         ),
       ]);
@@ -98,6 +82,7 @@ export const getWeeklySummary = async (req, res) => {
       const earnings = incRow.rows?.[0]?.total ?? 0;
       const contributions = contRow.rows?.[0]?.total ?? 0;
       const expenses = expRow.rows?.[0]?.total ?? 0;
+      const debtOutstanding = debtRow.rows?.[0]?.total ?? 0;
       const savings =
         Math.round((earnings - contributions - expenses) * 100) / 100;
 
@@ -110,10 +95,11 @@ export const getWeeklySummary = async (req, res) => {
         contributions: Math.round(contributions),
         expenses: Math.round(expenses),
         savings,
+        debtOutstanding: Math.round(debtOutstanding),
       });
     }
 
-    // ── Current Kenyan month totals (always "now", not filtered) ─────────────
+    // ── Current Kenyan month totals ───────────────────────────────────────────
 
     const nowUTC = new Date();
     const eatMs = nowUTC.getTime() + 3 * 3_600_000;
@@ -123,21 +109,27 @@ export const getWeeklySummary = async (req, res) => {
     const curMonthStart = `${curYear}-${curMonth}-01`;
     const curMonthEnd = `${curYear}-${curMonth}-${pad(new Date(curYear, eatNow.getUTCMonth() + 1, 0).getDate())}`;
 
-    const [mInc, mCont, mExp] = await Promise.all([
+    const [mInc, mCont, mExp, mDebt] = await Promise.all([
       db.execute(
-        `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM income
-         WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?`,
+        `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM income
+         WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
         [curMonthStart, curMonthEnd],
       ),
       db.execute(
-        `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM contributions
-         WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?
-           AND status = 'paid'`,
+        `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM contributions
+         WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ? AND status = 'paid'`,
         [curMonthStart, curMonthEnd],
       ),
       db.execute(
-        `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM expenses
-         WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?`,
+        `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM expenses
+         WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
+        [curMonthStart, curMonthEnd],
+      ),
+      db.execute(
+        `SELECT ROUND(COALESCE(SUM(amount - amount_settled),0),2) AS total
+         FROM debts
+         WHERE status NOT IN ('settled','defaulted')
+           AND SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
         [curMonthStart, curMonthEnd],
       ),
     ]);
@@ -145,14 +137,16 @@ export const getWeeklySummary = async (req, res) => {
     const mEarnings = mInc.rows?.[0]?.total ?? 0;
     const mContributions = mCont.rows?.[0]?.total ?? 0;
     const mExpenses = mExp.rows?.[0]?.total ?? 0;
+    const mDebtOut = mDebt.rows?.[0]?.total ?? 0;
 
     const monthlyTotals = {
-      month: eatNow.getUTCMonth(), // 0-based, for label on frontend
+      month: eatNow.getUTCMonth(),
       year: curYear,
       earnings: Math.round(mEarnings),
       contributions: Math.round(mContributions),
       expenses: Math.round(mExpenses),
       savings: Math.round(mEarnings - mContributions - mExpenses),
+      debtOutstanding: Math.round(mDebtOut),
     };
 
     // ── Current year totals ───────────────────────────────────────────────────
@@ -160,21 +154,27 @@ export const getWeeklySummary = async (req, res) => {
     const yearStart = `${curYear}-01-01`;
     const yearEnd = `${curYear}-12-31`;
 
-    const [yInc, yCont, yExp] = await Promise.all([
+    const [yInc, yCont, yExp, yDebt] = await Promise.all([
       db.execute(
-        `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM income
-         WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?`,
+        `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM income
+         WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
         [yearStart, yearEnd],
       ),
       db.execute(
-        `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM contributions
-         WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?
-           AND status = 'paid'`,
+        `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM contributions
+         WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ? AND status = 'paid'`,
         [yearStart, yearEnd],
       ),
       db.execute(
-        `SELECT ROUND(COALESCE(SUM(amount), 0), 2) AS total FROM expenses
-         WHERE SUBSTR(date, 1, 10) >= ? AND SUBSTR(date, 1, 10) <= ?`,
+        `SELECT ROUND(COALESCE(SUM(amount),0),2) AS total FROM expenses
+         WHERE SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
+        [yearStart, yearEnd],
+      ),
+      db.execute(
+        `SELECT ROUND(COALESCE(SUM(amount - amount_settled),0),2) AS total
+         FROM debts
+         WHERE status NOT IN ('settled','defaulted')
+           AND SUBSTR(date,1,10) >= ? AND SUBSTR(date,1,10) <= ?`,
         [yearStart, yearEnd],
       ),
     ]);
@@ -182,6 +182,7 @@ export const getWeeklySummary = async (req, res) => {
     const yEarnings = yInc.rows?.[0]?.total ?? 0;
     const yContributions = yCont.rows?.[0]?.total ?? 0;
     const yExpenses = yExp.rows?.[0]?.total ?? 0;
+    const yDebtOut = yDebt.rows?.[0]?.total ?? 0;
 
     const yearlyTotals = {
       year: curYear,
@@ -189,9 +190,8 @@ export const getWeeklySummary = async (req, res) => {
       contributions: Math.round(yContributions),
       expenses: Math.round(yExpenses),
       savings: Math.round(yEarnings - yContributions - yExpenses),
+      debtOutstanding: Math.round(yDebtOut),
     };
-
-    // ── Response ──────────────────────────────────────────────────────────────
 
     res.json({
       success: true,
